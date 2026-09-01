@@ -11,6 +11,7 @@ import numpy as np
 import pybullet as p
 import pybullet_data
 
+from .accuracy.ground_truth import FIRE_SPAWN_SPECS
 from .config import get_project_paths
 from .prediction import PredictionEngine
 from .visualization import draw_topdown_map
@@ -84,6 +85,10 @@ class LustraApp:
         self.clicked_rel_errors_pct = deque(maxlen=5000)
         self.depth_compare_csv = os.path.join(self.paths.captured_images_dir, "clicked_depth_comparisons.csv")
         self.last_clicked_comparison = None
+        self.fire_ground_truth = []
+        self.detection_accuracy_csv = os.path.join(self.paths.captured_images_dir, "detection_accuracy_log.csv")
+        self.detection_visibility_px_threshold = 25
+        self.tracking_accuracy_csv = os.path.join(self.paths.captured_images_dir, "tracking_accuracy_log.csv")
         self.current_left_eye = self.base_eye_pos.copy()
         self.current_left_target = self.cam_target.copy()
         self.current_left_depth_m = None
@@ -154,6 +159,8 @@ class LustraApp:
         self._prediction_lock = threading.Lock()
 
         self._init_depth_compare_csv()
+        self._init_detection_accuracy_csv()
+        self._init_tracking_accuracy_csv()
 
     def _next_image_counter(self) -> int:
         import re
@@ -236,9 +243,22 @@ class LustraApp:
         wb.build_biome_world(tile_size=4, grid_range=25)
         ## fire spawner
         p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0) ##better performance
-        self.fire_body_id = wb.spawn_fire(center_pos=[25,25, 1], grid_size=7, max_radius=0.5, max_scale=20)
-        self.fire_body_id = wb.spawn_fire(center_pos=[70,-10, 1], grid_size=8, max_radius=0.5, max_scale=15)
-        self.fire_body_id = wb.spawn_fire(center_pos=[-50,-25, 1], grid_size=6, max_radius=0.5, max_scale=25)
+        for spec in FIRE_SPAWN_SPECS:
+            body_ids = wb.spawn_fire(
+                center_pos=list(spec.center_pos),
+                grid_size=spec.grid_size,
+                max_radius=spec.max_radius,
+                max_scale=spec.max_scale,
+            )
+            self.fire_body_id = body_ids
+            self.fire_ground_truth.append(
+                {
+                    "name": spec.name,
+                    "center_xy": spec.center_xy,
+                    "radius_m": spec.radius_m,
+                    "body_ids": set(body_ids or []),
+                }
+            )
         p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
 
         p.resetDebugVisualizerCamera(
@@ -265,6 +285,8 @@ class LustraApp:
         print("Press 'q' to quit.")
         print("Press 'c' to save current clicked ground point.")
         print(f"Clicked-point depth comparisons are logged to: {self.depth_compare_csv}")
+        print(f"Detection accuracy (vs sim ground truth) is logged to: {self.detection_accuracy_csv}")
+        print(f"Tracking accuracy (vs sim ground truth) is logged to: {self.tracking_accuracy_csv}")
 
     def _init_depth_compare_csv(self):
         if os.path.exists(self.depth_compare_csv) and os.path.getsize(self.depth_compare_csv) > 0:
@@ -288,6 +310,48 @@ class LustraApp:
                     "hit_y",
                     "hit_z",
                     "hit_body_id",
+                ]
+            )
+
+    def _init_detection_accuracy_csv(self):
+        if os.path.exists(self.detection_accuracy_csv) and os.path.getsize(self.detection_accuracy_csv) > 0:
+            return
+        with open(self.detection_accuracy_csv, "w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(
+                [
+                    "timestamp_unix",
+                    "frame",
+                    "true_fire_visible",
+                    "visible_fire_names",
+                    "yolo_fire_detected",
+                    "yolo_fire_count",
+                    "yolo_max_conf",
+                    "outcome",
+                ]
+            )
+
+    def _init_tracking_accuracy_csv(self):
+        if os.path.exists(self.tracking_accuracy_csv) and os.path.getsize(self.tracking_accuracy_csv) > 0:
+            return
+        with open(self.tracking_accuracy_csv, "w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(
+                [
+                    "timestamp_unix",
+                    "gt_name",
+                    "gt_center_x",
+                    "gt_center_y",
+                    "gt_radius_m",
+                    "track_id",
+                    "hits",
+                    "confirmed",
+                    "confidence",
+                    "age_s",
+                    "centroid_x",
+                    "centroid_y",
+                    "center_distance_m",
+                    "position_error_m",
                 ]
             )
 
@@ -379,6 +443,101 @@ class LustraApp:
         if len(self.clicked_abs_errors_m) < 20:
             return np.nan
         return float(np.percentile(np.array(self.clicked_abs_errors_m, dtype=np.float32), percentile))
+
+    def log_detection_accuracy(self, detections, seg_mask, frame_i):
+        """Compare YOLO's fire calls this frame against sim ground truth.
+
+        A ground-truth fire counts as "visible" when its known PyBullet body
+        ids actually show up in the segmentation buffer (so occluded fires
+        correctly don't count) with at least detection_visibility_px_threshold
+        pixels -- avoids counting a stray edge pixel as visible.
+        """
+        if seg_mask is None or not self.fire_ground_truth:
+            return
+        valid = seg_mask >= 0
+        body_ids_present = seg_mask[valid] & ((1 << 24) - 1)
+
+        visible_names = []
+        for gt in self.fire_ground_truth:
+            if not gt["body_ids"]:
+                continue
+            count = int(np.isin(body_ids_present, list(gt["body_ids"])).sum())
+            if count >= self.detection_visibility_px_threshold:
+                visible_names.append(gt["name"])
+        true_fire_visible = len(visible_names) > 0
+
+        yolo_fire_dets = [d for d in detections if self.is_fire_detection(d["class_name"])]
+        yolo_fire_detected = len(yolo_fire_dets) > 0
+        yolo_max_conf = max((d["conf"] for d in yolo_fire_dets), default=0.0)
+
+        if true_fire_visible and yolo_fire_detected:
+            outcome = "TP"
+        elif true_fire_visible and not yolo_fire_detected:
+            outcome = "FN"
+        elif not true_fire_visible and yolo_fire_detected:
+            outcome = "FP"
+        else:
+            outcome = "TN"
+
+        with open(self.detection_accuracy_csv, "a", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(
+                [
+                    f"{time.time():.6f}",
+                    frame_i,
+                    int(true_fire_visible),
+                    ";".join(visible_names),
+                    int(yolo_fire_detected),
+                    len(yolo_fire_dets),
+                    f"{yolo_max_conf:.4f}",
+                    outcome,
+                ]
+            )
+
+    def log_tracking_accuracy(self, timestamp_s):
+        """Snapshot every fire_tracker track's position error vs its nearest
+        ground-truth fire cluster, for later ID-switch / coverage / position
+        error analysis (see generate_tracking_report.py)."""
+        if not self.fire_ground_truth:
+            return
+        tracks = self.fire_tracker.get_active_tracks(timestamp_s, include_unconfirmed=True)
+        if not tracks:
+            return
+
+        rows = []
+        for track in tracks:
+            centroid = track["centroid_xy"]
+            best_gt = None
+            best_dist = None
+            for gt in self.fire_ground_truth:
+                dist = float(np.linalg.norm(np.asarray(centroid) - np.asarray(gt["center_xy"])))
+                if best_dist is None or dist < best_dist:
+                    best_dist = dist
+                    best_gt = gt
+            position_error_m = max(0.0, best_dist - best_gt["radius_m"])
+            confirmed = track["hits"] >= self.fire_tracker.min_hits
+            rows.append(
+                [
+                    f"{timestamp_s:.6f}",
+                    best_gt["name"],
+                    f"{best_gt['center_xy'][0]:.4f}",
+                    f"{best_gt['center_xy'][1]:.4f}",
+                    f"{best_gt['radius_m']:.4f}",
+                    track["track_id"],
+                    track["hits"],
+                    int(confirmed),
+                    f"{track['confidence']:.4f}",
+                    f"{track['age_s']:.4f}",
+                    f"{centroid[0]:.4f}",
+                    f"{centroid[1]:.4f}",
+                    f"{best_dist:.4f}",
+                    f"{position_error_m:.4f}",
+                ]
+            )
+
+        with open(self.tracking_accuracy_csv, "a", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerows(rows)
 
     def make_depth_comparison_panel(self):
         panel_h, panel_w = 430, 640
@@ -682,6 +841,8 @@ class LustraApp:
         if timestamp_s - self._last_fire_map_write < self._fire_map_interval_s:
             return
 
+        self.log_tracking_accuracy(timestamp_s)
+
         drone_lon, drone_lat = self.fire_tracker.world_xy_to_lonlat((self.base_eye_pos[0], self.base_eye_pos[1]))
 
         fire_geojson = self.fire_tracker.to_geojson(timestamp_s)
@@ -967,6 +1128,7 @@ class LustraApp:
 
             if self._detector_ready:
                 detections = self.detector.detect(img_left, self.width, self.height, conf_thres=self.conf_threshold)
+                self.log_detection_accuracy(detections, left_seg_mask, self.frame_i)
             else:
                 detections = []
                 if self._detector_error is not None and not self._detector_wait_printed:

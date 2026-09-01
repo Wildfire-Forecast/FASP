@@ -1,0 +1,25 @@
+Tracking accuracy report (position error + ID stability vs. sim ground truth)
+==================================================================================
+Ticks logged: 140   Ground-truth fire clusters seen: 3
+
+[fire_1]  true radius=10.0 m  capture radius=30.0 m
+  Ticks logged: 33   Covered (a track within capture radius): 30 (90.9%)
+  Position error (confirmed tracks, m): mean=1.31  median=0.00  min=0.00  max=18.85
+  ID switches while covered: 0   Coverage segments (fragmentation): 1
+  Time-to-confirm (first log tick -> first confirmed+covered tick): 0.0 s
+
+[fire_2]  true radius=7.5 m  capture radius=22.5 m
+  Ticks logged: 32   Covered (a track within capture radius): 32 (100.0%)
+  Position error (confirmed tracks, m): mean=2.58  median=0.00  min=0.00  max=9.59
+  ID switches while covered: 1   Coverage segments (fragmentation): 1
+  Time-to-confirm (first log tick -> first confirmed+covered tick): 2.6 s
+
+[fire_3]  true radius=12.5 m  capture radius=37.5 m
+  Ticks logged: 75   Covered (a track within capture radius): 72 (96.0%)
+  Position error (confirmed tracks, m): mean=6.72  median=3.35  min=0.00  max=24.09
+  ID switches while covered: 1   Coverage segments (fragmentation): 3
+  Time-to-confirm (first log tick -> first confirmed+covered tick): 1.3 s
+
+Overall mean position error (confirmed, covered ticks): 4.53 m
+
+Raw per-tick log: C:\Users\tuna\Documents\GitHub\Lustra\captured_images\tracking_accuracy_log.csv

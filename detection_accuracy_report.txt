@@ -1,0 +1,25 @@
+Detection accuracy report (simulator ground truth via segmentation buffer)
+============================================================================
+Frames logged: 1221   Active session time: 645.2 s
+
+Confusion matrix (frame-level: was a known fire body visible vs. did YOLO fire):
+  TP (fire visible, detected):       1041
+  FN (fire visible, missed):           75
+  FP (nothing visible, detected):       0
+  TN (nothing visible, quiet):        105
+
+Summary statistics:
+  Precision: 1.0000
+  Recall:    0.9328
+  F1:        0.9652
+  Accuracy:  0.9386
+  Mean YOLO confidence on TP frames: 0.9143
+
+Sessions (split on timestamp gap > 30s or frame reset):
+  Session 1: frames=51-289  n= 239  span= 140.6s  TP= 221 FN=  11 FP=   0 TN=   7  
+  Session 2: frames=72-489  n= 418  span= 236.7s  TP= 354 FN=  37 FP=   0 TN=  27  
+  Session 3: frames=38-261  n= 224  span= 111.1s  TP= 175 FN=   9 FP=   0 TN=  40  
+  Session 4: frames=36-375  n= 340  span= 156.8s  TP= 291 FN=  18 FP=   0 TN=  31  
+4/4 sessions (1221 rows; dropped 0 rows from 0 short test session(s)).
+
+Raw per-frame log: C:\Users\tuna\Documents\GitHub\Lustra\captured_images\detection_accuracy_log.csv

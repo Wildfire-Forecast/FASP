@@ -1,0 +1,13 @@
+Spread prediction accuracy report (Rothermel reference-scenario suite)
+============================================================================
+Generated: 2026-08-16T21:14:40+00:00
+Scenarios passed: 5/5
+
+Reference scenario suite:
+  [PASS] GR2 low wind cool dry           ROS=  2.39 m/min  band=(0.50, 8.00)
+  [PASS] GR2 hot dry high wind           ROS=  8.49 m/min  band=(3.00, 25.00)
+  [PASS] SH5 dry shrub on slope          ROS= 17.61 m/min  band=(5.00, 60.00)
+  [PASS] NB1 nonburnable                 ROS=  0.00 m/min  band=(0.00, 0.00)
+  [PASS] GR2 calm                        ROS=  0.00 m/min  band=(0.00, 2.00)
+
+Each scenario computes compute_spread() rate-of-spread for a fixed fuel/weather/slope combination and checks it against a literature-derived expected band (see REFERENCE_SCENARIOS in lustra/prediction/validation.py for citations). PASS means the model's ROS falls within that band.
